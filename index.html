@@ -5,83 +5,60 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rizal Commute Map</title>
   
-  <!-- Leaflet CSS -->
+  <!-- Leaflet CSS & Routing Machine CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
   
   <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      font-family: Arial, sans-serif;
-    }
-    #map {
-      height: 100vh;
-      width: 100%;
-    }
+    body, html { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; }
+    #map { height: 100vh; width: 100%; }
+    /* Itago ang side panel ng routing para linis ang mapa */
+    .leaflet-routing-container { display: none !important; }
   </style>
 </head>
 <body>
 
   <div id="map"></div>
 
-  <!-- Leaflet JS -->
+  <!-- Leaflet JS & Routing Machine JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+
   <script>
-    // I-center ang mapa sa kahabaan ng Rizal at Marikina/Cubao corridor
     const map = L.map('map').setView([14.6200, 121.1200], 12);
 
-    // OpenStreetMap tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // 1. Key Terminals / Landmarks
-    const padilla = [14.6190, 121.1730];   // Cogeo / Padilla, Antipolo
-    const marikina = [14.6295, 121.0960];  // Marikina Shoe Avenue / Bayan
-    const cubao = [14.6186, 121.0535];     // Cubao Gateway / Aurora Blvd
+    // Coordinate Points
+    const padilla = L.latLng(14.6190, 121.1730);
+    const marikina = L.latLng(14.6295, 121.0960);
+    const cubao = L.latLng(14.6186, 121.0535);
 
-    // Maglagay ng Markers
-    L.marker(padilla).addTo(map).bindPopup("<b>Padilla Terminal (Antipolo)</b><br>Dulo ng ruta para sa Cubao at Marikina Jeeps");
-    L.marker(marikina).addTo(map).bindPopup("<b>Marikina City Center</b><br>Bayan / Shoe Avenue");
-    L.marker(cubao).addTo(map).bindPopup("<b>Cubao Terminal</b><br>Aurora Blvd / LRT-2 Station");
-
-    // 2. Ruta 1: Padilla to Cubao (Balikan) - Kulay Asul
-    const padillaToCubaoCoords = [
-      padilla,
-      [14.6220, 121.1350], // Cogeo Proper / Marcos Hwy
-      [14.6205, 121.1000], // Masinag / SM City Masinag
-      [14.6225, 121.0850], // LRT-2 Santolan
-      [14.6220, 121.0650], // Katipunan flyover / Aurora Blvd
-      cubao
-    ];
-
-    const cubaoRoute = L.polyline(padillaToCubaoCoords, {
-      color: '#1e88e5',
-      weight: 5,
-      opacity: 0.8
+    // 1. Ruta: Padilla to Cubao (Awtomatikong lalapat sa kalsada)
+    L.Routing.control({
+      waypoints: [padilla, cubao],
+      lineOptions: { styles: [{ color: '#1e88e5', weight: 6, opacity: 0.8 }] },
+      createMarker: function(i, wp) {
+        if (i === 0) return L.marker(wp.latLng).bindPopup("<b>Padilla Terminal</b>");
+        if (i === 1) return L.marker(wp.latLng).bindPopup("<b>Cubao Terminal</b>");
+      },
+      addWaypoints: false,
+      draggableWaypoints: false
     }).addTo(map);
 
-    cubaoRoute.bindPopup("<b>Ruta: Padilla - Cubao (Balikan)</b><br>Daan: Marcos Highway, Aurora Blvd");
-
-    // 3. Ruta 2: Padilla to Marikina (Balikan) - Kulay Pula
-    const padillaToMarikinaCoords = [
-      padilla,
-      [14.6220, 121.1350], // Cogeo Proper
-      [14.6205, 121.1000], // Masinag
-      [14.6280, 121.0980], // Sumulong Highway / Sports Center
-      marikina
-    ];
-
-    const marikinaRoute = L.polyline(padillaToMarikinaCoords, {
-      color: '#e53935',
-      weight: 5,
-      opacity: 0.8,
-      dashArray: '8, 8' // Naka-dash para madaling maiba sa Cubao route
+    // 2. Ruta: Padilla to Marikina (Awtomatikong lalapat sa kalsada)
+    L.Routing.control({
+      waypoints: [padilla, marikina],
+      lineOptions: { styles: [{ color: '#e53935', weight: 5, opacity: 0.8, dashArray: '8, 8' }] },
+      createMarker: function(i, wp) {
+        if (i === 1) return L.marker(wp.latLng).bindPopup("<b>Marikina City Center</b>");
+      },
+      addWaypoints: false,
+      draggableWaypoints: false
     }).addTo(map);
-
-    marikinaRoute.bindPopup("<b>Ruta: Padilla - Marikina (Balikan)</b><br>Daan: Marcos Highway, Sumulong Hwy, Shoe Ave");
   </script>
 </body>
 </html>
