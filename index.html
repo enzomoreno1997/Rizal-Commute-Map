@@ -1,64 +1,391 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rizal Commute Map</title>
-  
-  <!-- Leaflet CSS & Routing Machine CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
-  
-  <style>
-    body, html { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; }
-    #map { height: 100vh; width: 100%; }
-    /* Itago ang side panel ng routing para linis ang mapa */
-    .leaflet-routing-container { display: none !important; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rizal & Metro Manila Commute and Fare Matrix</title>
+<script>
+  /* Hide only Tailwind's "do not use the CDN in production" console notice. Other warnings still show. */
+  (function () { var w = console.warn; console.warn = function () { if (String(arguments[0]).indexOf("cdn.tailwindcss.com") !== -1) return; w.apply(console, arguments); }; })();
+</script>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #map { order: 1; flex: 1 1 0; min-height: 260px; width: 100%; background: #dbeafe; }
+  aside { order: 2; height: 55vh; width: 100%; overflow-y: auto; box-sizing: border-box; }
+  @media (min-width: 768px) {
+    body { flex-direction: row; }
+    #map { order: 2; height: 100%; min-height: 0; }
+    aside { order: 1; width: 27rem; height: 100%; flex: none; }
+  }
+  table.m { border-collapse: collapse; font-size: 11px; }
+  table.m th, table.m td { border: 1px solid #e2e8f0; padding: 3px 5px; text-align: right; white-space: nowrap; }
+  table.m th:first-child, table.m td:first-child { text-align: left; position: sticky; left: 0; background: #f8fafc; z-index: 1; }
+  table.m td.c { cursor: pointer; } table.m td.c:hover { background: #ccfbf1; }
+  .tab-on { border-color: #0f766e; color: #0f766e; }
+</style>
 </head>
-<body>
+<body class="bg-slate-50 text-sm text-slate-800">
 
-  <div id="map"></div>
+<div id="map"></div>
 
-  <!-- Leaflet JS & Routing Machine JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+<aside class="border-t border-slate-200 bg-white md:border-r md:border-t-0">
+  <div class="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 pt-3">
+    <h1 class="text-base font-semibold">Rizal & Metro Manila commute</h1>
+    <p class="text-xs text-slate-500">LTFRB fares in force since <span id="eff"></span>. Distance-based road fares, rounded to the nearest ₱0.25.</p>
+    <div class="mt-2 flex gap-1" role="tablist">
+      <button data-tab="route" class="tab border-b-2 border-transparent px-3 py-2 font-medium">Route & fares</button>
+      <button data-tab="matrix" class="tab border-b-2 border-transparent px-3 py-2 font-medium">Fare matrix</button>
+      <button data-tab="info" class="tab border-b-2 border-transparent px-3 py-2 font-medium">Notes</button>
+    </div>
+  </div>
 
-  <script>
-    const map = L.map('map').setView([14.6200, 121.1200], 12);
+  <!-- Route & fares -->
+  <section id="p-route" class="space-y-3 p-4">
+    <div class="grid grid-cols-[1fr_auto] items-end gap-2">
+      <div class="space-y-2">
+        <label class="block text-xs font-semibold text-slate-600">From<select id="from" class="mt-1 w-full rounded-lg border border-slate-300 p-2"></select></label>
+        <label class="block text-xs font-semibold text-slate-600">To<select id="to" class="mt-1 w-full rounded-lg border border-slate-300 p-2"></select></label>
+      </div>
+      <button id="swap" class="mb-1 rounded-lg border border-slate-300 px-3 py-2 hover:bg-slate-50" aria-label="Swap origin and destination">Swap</button>
+    </div>
+    <div id="chips" class="flex flex-wrap gap-1.5"></div>
+    <p id="hint" class="rounded-lg bg-amber-50 p-2 text-xs text-amber-800"></p>
+    <div id="results" hidden class="space-y-3">
+    <div class="grid grid-cols-3 gap-2 text-center">
+      <div class="rounded-lg bg-slate-50 p-2"><p class="text-xs text-slate-500">Road distance</p><p id="dist" class="font-semibold">–</p></div>
+      <div class="rounded-lg bg-slate-50 p-2"><p class="text-xs text-slate-500">Drive time</p><p id="dur" class="font-semibold">–</p></div>
+      <div class="rounded-lg bg-slate-50 p-2"><p class="text-xs text-slate-500">Source</p><p id="src" class="text-xs font-semibold">–</p></div>
+    </div>
+    <div class="overflow-hidden rounded-lg border border-slate-200">
+      <table class="w-full text-xs">
+        <thead class="bg-slate-50 text-slate-500"><tr><th class="p-2 text-left font-medium">Mode</th><th class="p-2 text-right font-medium">Regular</th><th class="p-2 text-right font-medium">Student / senior / PWD</th></tr></thead>
+        <tbody id="fares"></tbody>
+      </table>
+    </div>
+    <p class="text-xs text-slate-500">Taxi and TNVS are meter estimates (₱65 flag-down for 500 m, then per-km and per-minute, assuming traffic is 1.5× free-flow). TNVS surge and pick-up fees are not included. Jeepneys and UV Express do not run every road, so use the figure as a ceiling for the distance.</p>
+    </div>
+  </section>
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
+  <!-- Fare matrix -->
+  <section id="p-matrix" class="hidden space-y-5 p-4">
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-semibold text-slate-600">Show
+        <select id="disc" class="ml-1 rounded border border-slate-300 p-1 font-normal"><option value="reg">Regular fare</option><option value="dis">Discounted (20%)</option></select></label>
+    </div>
+    <div>
+      <h2 class="mb-1 font-semibold">1. Fare scales</h2>
+      <div class="overflow-x-auto"><table class="m w-full" id="rates"></table></div>
+    </div>
+    <div>
+      <h2 class="mb-1 font-semibold">2. Fare by distance</h2>
+      <div class="overflow-x-auto"><table class="m w-full" id="dtable"></table></div>
+    </div>
+    <div>
+      <h2 class="mb-1 font-semibold">3. Rizal and Metro Manila hubs (estimated road km)</h2>
+      <label class="text-xs font-semibold text-slate-600">Mode <select id="mmode" class="ml-1 rounded border border-slate-300 p-1 font-normal"></select></label>
+      <p class="my-1 text-xs text-slate-500">Distances are straight-line × 1.35, so cells are estimates. Tap a cell to route it on the map for the real distance.</p>
+      <div class="overflow-x-auto"><table class="m" id="hubm"></table></div>
+    </div>
+    <div class="rounded-lg bg-slate-50 p-3 text-xs leading-relaxed">
+      <p class="font-semibold">Other fares</p>
+      <ul class="mt-1 list-disc space-y-1 pl-4">
+        <li><b>EDSA Busway (Carousel):</b> station-to-station, ₱18 minimum and ₱85 from Monumento to PITX.</li>
+        <li><b>Tricycles:</b> fares are set by each town or city, not by the LTFRB.</li>
+      </ul>
+    </div>
+  </section>
 
-    // Coordinate Points
-    const padilla = L.latLng(14.6190, 121.1730);
-    const marikina = L.latLng(14.6295, 121.0960);
-    const cubao = L.latLng(14.6186, 121.0535);
+  <!-- Notes -->
+  <section id="p-info" class="hidden space-y-3 p-4 text-xs leading-relaxed text-slate-600">
+    <p><b class="text-slate-800">How fares are computed.</b> Fare = minimum fare for the first band, plus the per-km rate for each km after it. Jeepneys use a 4 km band; city buses use 5 km. UV Express has no minimum, so it is rate × distance. The result is rounded to the nearest ₱0.25. The discount is 20% of the scale, rounded separately.</p>
+    <p><b class="text-slate-800">Discounts.</b> Students, senior citizens and PWDs get 20% off. Carry your ID, because it is not applied automatically.</p>
+    <p><b class="text-slate-800">Provisional rates.</b> UV Express and taxi increases were approved as provisional while petitions are decided. Fares can change, and the fare board in the vehicle is what counts.</p>
+    <p><b class="text-slate-800">Overcharged?</b> Report it to the LTFRB hotline, 1342, with the plate or body number, route and time.</p>
+    <p><b class="text-slate-800">Map accuracy.</b> Hub and station positions are approximate,. Road routes come from the free OpenStreetMap-based routing service (routing.openstreetmap.de), with backup servers. If all are unreachable, no line is drawn and the fares shown are estimates.</p>
+    <div class="rounded-lg border border-slate-200 p-3">
+      <p class="font-semibold text-slate-800">Routing service (optional)</p>
+      <p class="mt-1">For the most reliable road lines, paste a free API key. It is tried first, then the free servers. The key is saved only in this browser. Get one at openrouteservice.org or graphhopper.com.</p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <select id="rprov" class="rounded border border-slate-300 p-1.5"><option value="ors">OpenRouteService</option><option value="gh">GraphHopper</option></select>
+        <input id="rkey" class="min-w-0 flex-1 rounded border border-slate-300 p-1.5" placeholder="API key" autocomplete="off">
+        <button id="rsave" class="rounded bg-teal-700 px-3 py-1.5 font-medium text-white">Save</button>
+      </div>
+      <p id="rmsg" class="mt-1 text-slate-500"></p>
+    </div>
+    <p class="text-slate-400">Sources: LTFRB fare guides effective Sept 28, 2026 as reported by DOTr, GMA News and ParkinganPH.</p>
+  </section>
+</aside>
 
-    // 1. Ruta: Padilla to Cubao (Awtomatikong lalapat sa kalsada)
-    L.Routing.control({
-      waypoints: [padilla, cubao],
-      lineOptions: { styles: [{ color: '#1e88e5', weight: 6, opacity: 0.8 }] },
-      createMarker: function(i, wp) {
-        if (i === 0) return L.marker(wp.latLng).bindPopup("<b>Padilla Terminal</b>");
-        if (i === 1) return L.marker(wp.latLng).bindPopup("<b>Cubao Terminal</b>");
-      },
-      addWaypoints: false,
-      draggableWaypoints: false
-    }).addTo(map);
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+if (typeof L === "undefined") {
+  document.getElementById("map").innerHTML = '<p style="padding:16px;color:#b91c1c">The map library could not load. Check your internet connection or ad-blocker, then reload the page.</p>';
+  throw new Error("Leaflet not loaded");
+}
+/* ───────── Data ───────── */
+const EFFECTIVE = "Sept 28, 2026";
+document.getElementById("eff").textContent = EFFECTIVE;
 
-    // 2. Ruta: Padilla to Marikina (Awtomatikong lalapat sa kalsada)
-    L.Routing.control({
-      waypoints: [padilla, marikina],
-      lineOptions: { styles: [{ color: '#e53935', weight: 5, opacity: 0.8, dashArray: '8, 8' }] },
-      createMarker: function(i, wp) {
-        if (i === 1) return L.marker(wp.latLng).bindPopup("<b>Marikina City Center</b>");
-      },
-      addWaypoints: false,
-      draggableWaypoints: false
-    }).addTo(map);
-  </script>
+// id, name, group, lat, lng, matrix?, info   (positions are approximate)
+const H = [
+  ["padilla","Padilla Terminal","Rizal",14.6190,121.1730,0,"Terminal from the original map."],
+  ["antipolo","Antipolo City","Rizal",14.5866,121.1761,1,"Provincial capital of Rizal. Cathedral and Sumulong Highway area."],
+  ["cainta","Cainta","Rizal",14.5786,121.1222,1,"Cainta Junction is a major jeepney and UV hub on Ortigas Ave. Extension."],
+  ["taytay","Taytay","Rizal",14.5690,121.1324,1,"Garments and commercial hub along Manila East Road."],
+  ["angono","Angono","Rizal",14.5264,121.1537,1,"Art capital of the Philippines, on Laguna de Bay."],
+  ["binangonan","Binangonan","Rizal",14.4640,121.1925,1,"Lakeshore town with a ferry and jeepney terminal."],
+  ["cardona","Cardona","Rizal",14.4864,121.2292,0,"Lake town on the Talim Island road."],
+  ["morong","Morong","Rizal",14.5117,121.2386,0,"Old church town on the eastern lakeshore."],
+  ["teresa","Teresa","Rizal",14.5617,121.2078,0,"Hill town near Antipolo and Morong."],
+  ["baras","Baras","Rizal",14.5222,121.2656,0,"Eastern Rizal, near Tanay."],
+  ["tanay","Tanay","Rizal",14.4986,121.2850,0,"Gateway to the Sierra Madre; the longest Rizal commute."],
+  ["pililla","Pililla","Rizal",14.4833,121.3067,0,"Eastern lakeshore, wind farm area."],
+  ["jalajala","Jala-Jala","Rizal",14.3536,121.3256,0,"Peninsula town on Laguna de Bay."],
+  ["rodriguez","Rodriguez (Montalban)","Rizal",14.7603,121.1450,1,"Northern Rizal, with jeepney links to San Mateo and Marikina."],
+  ["sanmateo","San Mateo","Rizal",14.6969,121.1222,1,"Marikina–Montalban corridor town."],
+  ["marikina","Marikina","Metro Manila",14.6295,121.0960,1,"Marikina City center, along the Marcos Highway corridor."],
+  ["cubao","Cubao, Quezon City","Metro Manila",14.6186,121.0535,1,"Araneta Center: major bus, jeepney and UV Express terminals."],
+  ["fairview","Fairview, Quezon City","Metro Manila",14.7338,121.0580,0,"Northern QC terminus for many buses and UV routes."],
+  ["greenhills","Greenhills, San Juan","Metro Manila",14.6020,121.0480,0,"San Juan: shopping and UV Express hub."],
+  ["shaw","Shaw / Mandaluyong","Metro Manila",14.5815,121.0530,0,"Mandaluyong: Shaw Boulevard and EDSA."],
+  ["ortigas","Ortigas Center, Pasig","Metro Manila",14.5873,121.0615,1,"Business district on EDSA and Ortigas Ave."],
+  ["pasig","Pasig (Kapitolyo)","Metro Manila",14.5764,121.0851,0,"Pasig City area near the Rizal boundary."],
+  ["pateros","Pateros","Metro Manila",14.5446,121.0687,0,"Only municipality in Metro Manila."],
+  ["bgc","BGC, Taguig","Metro Manila",14.5507,121.0509,0,"Bonifacio Global City; Taguig."],
+  ["makati","Makati (Ayala)","Metro Manila",14.5547,121.0244,1,"Central business district; Ayala Avenue."],
+  ["manila","Manila (Recto)","Metro Manila",14.6035,120.9833,1,"Recto and Divisoria area, a major jeepney and bus corridor."],
+  ["monumento","Monumento, Caloocan","Metro Manila",14.6543,120.9839,1,"EDSA Busway north terminus."],
+  ["malabon","Malabon","Metro Manila",14.6620,120.9569,0,"Northwest NCR."],
+  ["navotas","Navotas","Metro Manila",14.6667,120.9417,0,"Fishing port city."],
+  ["valenzuela","Valenzuela","Metro Manila",14.7011,120.9830,0,"Northern NCR."],
+  ["moa","Mall of Asia, Pasay","Metro Manila",14.5352,120.9822,0,"Pasay: bayside; EDSA Busway stop."],
+  ["pitx","PITX, Parañaque","Metro Manila",14.5107,120.9908,1,"Southwest transport hub; EDSA Busway south terminus."],
+  ["laspinas","Las Piñas","Metro Manila",14.4505,120.9830,0,"Southern NCR."],
+  ["alabang","Alabang, Muntinlupa","Metro Manila",14.4231,121.0411,1,"Southern NCR hub for buses and UV to Laguna and Cavite."],
+];
+const byId = Object.fromEntries(H.map(h => [h[0], h]));
+
+// base = minimum fare, band = km covered by it, rate = per extra km
+const MODES = [
+  {id:"puj",  name:"Traditional jeepney", base:14, band:4, rate:2.00},
+  {id:"mpuj", name:"Modern jeepney",      base:17, band:4, rate:2.40},
+  {id:"bus",  name:"City bus (ordinary)", base:15, band:5, rate:2.49},
+  {id:"abus", name:"City bus (aircon)",   base:18, band:5, rate:2.98},
+  {id:"uv",   name:"UV Express (traditional)", base:0, band:0, rate:2.60, prov:1},
+  {id:"muv",  name:"UV Express (modern)",      base:0, band:0, rate:3.00, prov:1},
+  {id:"pbus", name:"Provincial bus (ordinary)", base:12, band:5, rate:2.20},
+  {id:"pabus",name:"Provincial bus (aircon)",   base:0, band:0, rate:2.45},
+];
+const r25 = x => Math.round(x * 4 + 1e-9) / 4;
+const peso = x => "₱" + x.toFixed(2).replace(/\.00$/, "");
+function fare(m, d) {
+  const raw = d <= m.band ? m.base : m.base + (d - m.band) * m.rate;
+  return { reg: r25(raw), dis: r25(raw * 0.8), raw };
+}
+const metered = (flag, perKm, d, min) => flag + Math.max(0, d - 0.5) * perKm + min * 2;
+const rad = x => x * Math.PI / 180;
+function hav(a, b) {
+  const R = 6371, dLa = rad(b[0] - a[0]), dLo = rad(b[1] - a[1]);
+  const s = Math.sin(dLa / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+const est = (a, b) => hav([a[3], a[4]], [b[3], b[4]]) * 1.35;
+
+/* ───────── Map ───────── */
+const map = L.map("map").setView([14.60, 121.10], 11);
+const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+const carto = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors © CARTO" });
+const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 18, attribution: "Tiles © Esri" });
+const rizalLayer = L.layerGroup().addTo(map), ncrLayer = L.layerGroup().addTo(map);
+L.control.layers({ "Street map": osm, "Light map": carto, "Satellite": sat }, { "Rizal towns": rizalLayer, "Metro Manila hubs": ncrLayer }, { collapsed: true }).addTo(map);
+
+const markers = {};
+H.forEach(h => {
+  const rizal = h[2] === "Rizal";
+  const m = L.circleMarker([h[3], h[4]], { bubblingMouseEvents: false, radius: 7, color: "#fff", weight: 2, fillColor: rizal ? "#0f766e" : "#475569", fillOpacity: 1 })
+    .bindTooltip(h[1]).addTo(rizal ? rizalLayer : ncrLayer);
+  m.bindPopup(`<b>${h[1]}</b><br><span style="color:#64748b">${h[2]}</span><p style="margin:4px 0">${h[6]}</p>
+    <button data-set="from:${h[0]}" style="margin-right:6px;color:#0f766e;font-weight:600">Set as From</button><button data-set="to:${h[0]}" style="color:#0f766e;font-weight:600">Set as To</button>`);
+  markers[h[0]] = m;
+});
+document.addEventListener("click", e => { const s = e.target.dataset && e.target.dataset.set; if (!s) return; const [k, id] = s.split(":"); setPoint(k, pt(byId[id])); map.closePopup(); update(); });
+
+/* ───────── Route & fares ───────── */
+const $ = id => document.getElementById(id);
+/* Routing providers. Each returns { pts: [[lat,lng],...], km, min } or throws. */
+const osrm = (name, base) => ({ name, run: async (a, b, sig) => {
+  const j = await (await fetch(`${base}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`, { signal: sig })).json();
+  if (j.code !== "Ok" || !j.routes[0]) throw new Error("no route");
+  const r = j.routes[0]; return { pts: r.geometry.coordinates.map(c => [c[1], c[0]]), km: r.distance / 1000, min: r.duration / 60 };
+} });
+const ors = key => ({ name: "OpenRouteService", keyed: true, run: async (a, b, sig) => {
+  const res = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?api_key=${encodeURIComponent(key)}&start=${a.lng},${a.lat}&end=${b.lng},${b.lat}`, { signal: sig });
+  if (!res.ok) throw new Error("ors " + res.status);
+  const f = (await res.json()).features[0]; return { pts: f.geometry.coordinates.map(c => [c[1], c[0]]), km: f.properties.summary.distance / 1000, min: f.properties.summary.duration / 60 };
+} });
+const graphhopper = key => ({ name: "GraphHopper", keyed: true, run: async (a, b, sig) => {
+  const res = await fetch(`https://graphhopper.com/api/1/route?point=${a.lat},${a.lng}&point=${b.lat},${b.lng}&profile=car&points_encoded=false&key=${encodeURIComponent(key)}`, { signal: sig });
+  if (!res.ok) throw new Error("gh " + res.status);
+  const p = (await res.json()).paths[0]; return { pts: p.points.coordinates.map(c => [c[1], c[0]]), km: p.distance / 1000, min: p.time / 60000 };
+} });
+function decode6(s) { // Valhalla polyline (precision 6)
+  let i = 0, lat = 0, lng = 0; const out = [];
+  while (i < s.length) {
+    for (let k = 0; k < 2; k++) {
+      let b, sh = 0, r = 0;
+      do { b = s.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
+      const d = (r & 1) ? ~(r >> 1) : (r >> 1);
+      if (k === 0) lat += d; else lng += d;
+    }
+    out.push([lat / 1e6, lng / 1e6]);
+  }
+  return out;
+}
+const valhalla = { name: "Valhalla", run: async (a, b, sig) => {
+  const q = encodeURIComponent(JSON.stringify({ locations: [{ lat: a.lat, lon: a.lng }, { lat: b.lat, lon: b.lng }], costing: "auto", directions_options: { units: "kilometers" } }));
+  const res = await fetch(`https://valhalla1.openstreetmap.de/route?json=${q}`, { signal: sig });
+  if (!res.ok) throw new Error("valhalla " + res.status);
+  const t = (await res.json()).trip; return { pts: decode6(t.legs[0].shape), km: t.summary.length, min: t.summary.time / 60 };
+} };
+const FREE = [osrm("OpenStreetMap server", "https://routing.openstreetmap.de/routed-car"), osrm("OSRM demo", "https://router.project-osrm.org"), valhalla];
+const KEY = "rizalmap-routing";
+function loadCfg() { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; } }
+function providers() { const c = loadCfg(); const k = c.key && c.key.trim(); return (k ? [c.prov === "gh" ? graphhopper(k) : ors(k)] : []).concat(FREE); }
+const cache = new Map(), pins = { from: null, to: null };
+let pts = { from: null, to: null }, routeLine = null, endMarks = [], reqId = 0;
+
+const pt = h => ({ id: h[0], name: h[1], lat: h[3], lng: h[4] });
+const opt = g => H.filter(h => h[2] === g).map(h => `<option value="${h[0]}">${h[1]}</option>`).join("");
+["from", "to"].forEach(k => $(k).innerHTML = `<option value="">Select a place, or tap the map</option><optgroup label="Rizal">${opt("Rizal")}</optgroup><optgroup label="Metro Manila">${opt("Metro Manila")}</optgroup>`);
+
+/* Keep the dropdown in sync with a point (a hub, a pinned map point, or nothing). */
+function setPoint(k, p) {
+  pts[k] = p;
+  const s = $(k);
+  if (p && !byId[p.id]) {
+    pins[k] = p;
+    let o = s.querySelector('option[value="__pin"]');
+    if (!o) { o = document.createElement("option"); o.value = "__pin"; s.insertBefore(o, s.children[1] || null); }
+    o.textContent = p.name; s.value = "__pin";
+  } else s.value = p ? p.id : "";
+}
+["from", "to"].forEach(k => $(k).onchange = () => { const v = $(k).value; pts[k] = v === "" ? null : v === "__pin" ? pins[k] : pt(byId[v]); update(); });
+
+const PRESETS = [["antipolo","cubao"],["cainta","ortigas"],["taytay","makati"],["marikina","cubao"],["rodriguez","sanmateo"],["binangonan","antipolo"]];
+$("chips").innerHTML = PRESETS.map(p => `<button data-p="${p[0]}:${p[1]}" class="rounded-full border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50">${byId[p[0]][1].split(" ")[0]} → ${byId[p[1]][1].split(/[ ,]/)[0]}</button>`).join("");
+$("chips").onclick = e => { const p = e.target.dataset.p; if (!p) return; const [x, y] = p.split(":"); setPoint("from", pt(byId[x])); setPoint("to", pt(byId[y])); update(); };
+$("swap").onclick = () => { const f = pts.from, t = pts.to; setPoint("from", t); setPoint("to", f); update(); };
+
+/* Tap the map: 1st tap = From, 2nd tap = To, a 3rd tap starts over with a new From. */
+map.on("click", e => {
+  const p = { id: "pin", name: `Pinned point (${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)})`, lat: e.latlng.lat, lng: e.latlng.lng };
+  if (!pts.from) setPoint("from", p);
+  else if (!pts.to) setPoint("to", p);
+  else { setPoint("from", p); setPoint("to", null); }
+  update();
+});
+
+function showFares(d, mins, estimated, name) {
+  $("results").hidden = false;
+  $("dist").textContent = d.toFixed(1) + " km";
+  $("dur").textContent = Math.round(mins) + " min";
+  $("src").textContent = estimated ? "Estimate" : "Road route · " + name;
+  const rows = MODES.map(m => ({ m, f: fare(m, d) }));
+  const cheapest = Math.min(...rows.map(r => r.f.reg));
+  const traffic = mins * 1.5;
+  const taxi = metered(65, 13.5, d, traffic), tnvs = metered(65, 15, d, traffic);
+  $("fares").innerHTML = rows.map(({ m, f }) => {
+    const detail = d <= m.band ? `minimum, first ${m.band} km` : m.base ? `${peso(m.base)} + ${(d - m.band).toFixed(1)} km × ${peso(m.rate)}` : `${d.toFixed(1)} km × ${peso(m.rate)}`;
+    return `<tr class="border-t border-slate-100 ${f.reg === cheapest ? "bg-emerald-50" : ""}"><td class="p-2">${m.name}${m.prov ? " <span class='text-amber-600'>(provisional)</span>" : ""}<div class="text-[10px] text-slate-400">${detail}</div></td><td class="p-2 text-right font-semibold">${peso(f.reg)}</td><td class="p-2 text-right">${peso(f.dis)}</td></tr>`;
+  }).join("") + [["Regular taxi (estimate)", taxi], ["TNVS sedan (estimate)", tnvs]].map(([n, v]) => `<tr class="border-t border-slate-100 text-slate-500"><td class="p-2">${n}</td><td class="p-2 text-right">~${peso(Math.round(v))}</td><td class="p-2 text-right">–</td></tr>`).join("");
+}
+
+/* Redraw everything for the current From / To. No line is drawn until both are set. */
+function update() {
+  reqId++;
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+  endMarks.forEach(m => map.removeLayer(m)); endMarks = [];
+  $("results").hidden = true;
+  [["from", "A", "#16a34a"], ["to", "B", "#dc2626"]].forEach(([k, t, c]) => {
+    const p = pts[k]; if (!p) return;
+    endMarks.push(L.marker([p.lat, p.lng], { interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
+      html: `<div style="width:26px;height:26px;border-radius:50%;background:${c};color:#fff;font:700 13px/26px sans-serif;text-align:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">${t}</div>` }) }).addTo(map));
+  });
+  const hint = $("hint"); hint.hidden = false;
+  if (!pts.from || !pts.to) {
+    hint.textContent = !pts.from ? "Choose a From place (or tap the map) to start." : "Now choose a To place (or tap the map).";
+    const p = pts.from || pts.to; if (p) map.setView([p.lat, p.lng], Math.max(map.getZoom(), 13));
+    return;
+  }
+  if (pts.from.lat === pts.to.lat && pts.from.lng === pts.to.lng) { hint.textContent = "From and To are the same place."; return; }
+  loadRoute();
+}
+
+async function loadRoute() {
+  const id = reqId, a = pts.from, b = pts.to, hint = $("hint"), ck = `${a.lat},${a.lng};${b.lat},${b.lng}|${JSON.stringify(loadCfg())}`;
+  hint.hidden = false; hint.textContent = "Finding the road route…";
+  let hit = cache.get(ck), keyFailed = false;
+  if (!hit) {
+    for (const p of providers()) {
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 9000);
+      try { const r = await p.run(a, b, ctl.signal); if (r.pts.length > 1) { hit = { r, name: p.name }; cache.set(ck, hit); clearTimeout(t); break; } }
+      catch (err) { if (p.keyed) keyFailed = true; }
+      clearTimeout(t);
+    }
+  }
+  if (id !== reqId) return; // a newer selection replaced this one
+  if (!hit) { // every provider failed: no line is drawn, fares are estimates
+    const d = hav([a.lat, a.lng], [b.lat, b.lng]) * 1.35;
+    showFares(d, d / 20 * 60, true);
+    hint.innerHTML = 'Could not reach any routing service, so no road line is shown and fares are estimates. <button id="retry" class="font-semibold underline">Retry</button>';
+    $("retry").onclick = update;
+    return;
+  }
+  routeLine = L.polyline(hit.r.pts, { color: "#0f766e", weight: 6, opacity: .85 }).addTo(map);
+  map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+  showFares(hit.r.km, hit.r.min, false, hit.name);
+  if (keyFailed) hint.textContent = "Your API key was not accepted (or its quota is used up), so a free server was used instead.";
+  else hint.hidden = true;
+}
+
+const cfg0 = loadCfg(); $("rprov").value = cfg0.prov || "ors"; $("rkey").value = cfg0.key || "";
+$("rsave").onclick = () => {
+  const c = { prov: $("rprov").value, key: $("rkey").value.trim() };
+  try { localStorage.setItem(KEY, JSON.stringify(c)); $("rmsg").textContent = c.key ? "Saved. Routes will try your key first." : "Key cleared. Free servers will be used."; }
+  catch (e) { $("rmsg").textContent = "This browser would not save the key; it will be forgotten on reload."; }
+  if (pts.from && pts.to) update();
+};
+
+/* ───────── Fare matrix ───────── */
+function buildMatrix() {
+  const k = $("disc").value, mode = MODES.find(m => m.id === $("mmode").value);
+  $("rates").innerHTML = `<tr><th>Mode</th><th>Minimum</th><th>Per km</th></tr>` + MODES.map(m =>
+    `<tr><td>${m.name}${m.prov ? "*" : ""}</td><td>${m.base ? peso(m.base) + " / " + m.band + " km" : "none"}</td><td>${peso(m.rate)}</td></tr>`).join("") +
+    `<tr><td>Regular taxi</td><td>₱65 / 0.5 km</td><td>₱13.50 + ₱2/min</td></tr><tr><td>TNVS sedan</td><td>₱65 / 0.5 km</td><td>₱15 + ₱2/min</td></tr>`;
+  const D = [2, 4, 5, 8, 10, 15, 20, 30, 40, 50];
+  $("dtable").innerHTML = `<tr><th>km</th>${D.map(d => `<th>${d}</th>`).join("")}</tr>` +
+    MODES.map(m => `<tr><td>${m.name.replace("(", "").replace(")", "")}</td>${D.map(d => `<td>${peso(fare(m, d)[k]).slice(1)}</td>`).join("")}</tr>`).join("");
+  const hs = H.filter(h => h[5]);
+  $("hubm").innerHTML = `<tr><th>${mode.name}</th>${hs.map(h => `<th>${h[1].split(/[ ,(]/)[0]}</th>`).join("")}</tr>` +
+    hs.map(a => `<tr><td>${a[1].split(/[ ,(]/)[0]}</td>${hs.map(b => a === b ? "<td>–</td>" : `<td class="c" data-r="${a[0]}:${b[0]}" title="${est(a, b).toFixed(1)} km">${fare(mode, est(a, b))[k].toFixed(2).replace(/\.00$/, "")}</td>`).join("")}</tr>`).join("");
+}
+$("mmode").innerHTML = MODES.map(m => `<option value="${m.id}">${m.name}</option>`).join("");
+$("disc").onchange = $("mmode").onchange = buildMatrix;
+$("hubm").onclick = e => { const r = e.target.dataset.r; if (!r) return; const [x, y] = r.split(":"); setPoint("from", pt(byId[x])); setPoint("to", pt(byId[y])); show("route"); update(); };
+
+/* ───────── Tabs ───────── */
+function show(t) {
+  ["route", "matrix", "info"].forEach(x => $("p-" + x).classList.toggle("hidden", x !== t));
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("tab-on", b.dataset.tab === t));
+  setTimeout(() => map.invalidateSize(), 50);
+}
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => show(b.dataset.tab));
+show("route"); buildMatrix(); update();
+setTimeout(() => map.invalidateSize(), 300);
+window.addEventListener("resize", () => map.invalidateSize());
+</script>
 </body>
 </html>
